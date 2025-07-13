@@ -29,7 +29,7 @@
 
   <ItemGroup>
     <!-- build target -->
-    <Content Include="build\TcBuild.ficnar.targets">
+    <Content Include="build\TcBuild.targets">
       <Pack>true</Pack>
       <PackagePath>build</PackagePath>
     </Content>
@@ -46,7 +46,7 @@
 
   <PropertyGroup>
     <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);IncludeFilesInPackage</TargetsForTfmSpecificContentInPackage>
-    <PackageId>TcBuild.ficnar</PackageId>
+    <PackageId>TcBuild.JmAbuDabi</PackageId>
   </PropertyGroup>
   <Target Name="IncludeFilesInPackage">
     <ItemGroup>
