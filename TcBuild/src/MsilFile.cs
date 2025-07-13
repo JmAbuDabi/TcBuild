@@ -156,16 +156,36 @@ internal class MsilFile : IDisposable
         };
     }
 
+    private enum CommentBlock
+    {
+        None,       // Non comment block
+        Entering,   // Maybe start comment block, first '/'
+        Enter       // comment block (after '//')
+    }
+
     private IEnumerable<string> GetCodeLines()
     {
         var openBraces = 0;
         var codeLine = "";
+
+        var commentBlock = CommentBlock.None;
         foreach (var line in GetFileLines())
         {
             foreach (var ch in line)
             {
+                commentBlock = commentBlock switch
+                {
+                    CommentBlock.None => (ch == '/') ? CommentBlock.Entering : CommentBlock.None,
+                    CommentBlock.Entering => (ch == '/') ? CommentBlock.Enter : CommentBlock.None,
+                    CommentBlock.Enter => ch is '\n' or '\r' ? CommentBlock.None : CommentBlock.Enter,
+                    _ => throw new NotImplementedException()
+                };
+
+                if (commentBlock == CommentBlock.None)
+                {
                 if (ch == '(') openBraces++;
                 else if (ch == ')') openBraces--;
+            }
             }
 
             codeLine += (codeLine.Length == 0 ? string.Empty : Environment.NewLine) + line;
