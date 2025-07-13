@@ -89,10 +89,10 @@ public class Processor(ILogger log, Tools tools)
                         AssemblyFile,
                         new FileInfo(Path.ChangeExtension(AssemblyFile.FullName, ".pdb")),
                     }.Concat(ReferenceFiles.Where(_ => _.Extension != ".xml" && _.Name != "TcPluginBase.dll")
-                    // Hotfix until my pull request gets merged: https://github.com/peters/ILRepack.MSBuild.Task/pull/42
-                    //.Where(_ => _.Name != "Microsoft.Build.Framework.dll")
-                    //.Where(_ => _.Name != "Microsoft.Build.Utilities.Core.dll")
-                    //.Where(_ => _.Name != "System.Collections.Immutable.dll")
+                        // Hotfix until my pull request gets merged: https://github.com/peters/ILRepack.MSBuild.Task/pull/42
+                        //.Where(_ => _.Name != "Microsoft.Build.Framework.dll")
+                        //.Where(_ => _.Name != "Microsoft.Build.Utilities.Core.dll")
+                        //.Where(_ => _.Name != "System.Collections.Immutable.dll")
                     ),
                     GetSatelliteAssemblyFiles()
                 );
@@ -283,23 +283,7 @@ public class Processor(ILogger log, Tools tools)
             .Replace("[TcPluginBase]", "")
         );
 
-        var dllExportAttribute = $".custom instance void {typeof(DllExportAttribute).FullName}";
-
-        var count = 1;
-        foreach (var method in wrapper.Classes.SelectMany(_ => _.Methods).Where(_ => _.Public && _.Static))
-        {
-            var index = method.Lines.ToList().FindIndex(_ => _.ToString().Contains(dllExportAttribute));
-
-            if (index != -1)
-            {
-                var exportName = exportedMethods.FirstOrDefault(x => x.Method == method.Name).ExportName;
-
-                if (!string.IsNullOrEmpty(exportName))
-                {
-                    method.Lines[index] = $".export [{count++}] as '{exportName}'";
-                }
-            }
-        }
+        PatchExportAttribute(wrapper, exportedMethods);
 
         return wrapper;
     }
@@ -339,6 +323,49 @@ public class Processor(ILogger log, Tools tools)
         finally
         {
             //dir.Delete(true);
+        }
+    }
+
+    private static void PatchExportAttribute(MsilFile msilFile, (string Method, string ExportName)[] exportedMethods)
+    {
+        var dllExportAttribute = $".custom instance void {typeof(DllExportAttribute).FullName}";
+
+        var count = 1;
+        foreach (var method in msilFile.Classes.SelectMany(_ => _.Methods).Where(_ => _.Public && _.Static))
+        {
+            var index = method.Lines.ToList().FindIndex(_ => _.ToString().Contains(dllExportAttribute));
+
+            if (index == -1) continue;
+
+            var exportName = exportedMethods.FirstOrDefault(x => x.Method == method.Name).ExportName;
+
+            if (string.IsNullOrEmpty(exportName)) continue;
+
+            var testLine = method.Lines[index].ToString();
+            method.Lines[index] = $".export [{count++}] as {exportName}";
+
+            if (testLine.Substring(testLine.IndexOf("()", StringComparison.Ordinal) + 2).Contains(")")) continue;
+
+            var j = index + 1;
+            var newLines = method.Lines.ToList();
+
+            while (j < method.Lines.Length)
+            {
+                var raw = newLines[j].ToString();
+                var codePart = raw.Split(["//"], 2, StringSplitOptions.None)[0];
+
+                if (codePart.Contains("(")) break;
+
+                if (codePart.Contains(")"))
+                {
+                    newLines.RemoveAt(j);
+                    break;
+                }
+
+                newLines.RemoveAt(j);
+            }
+
+            method.Lines = newLines.ToArray();
         }
     }
 }
