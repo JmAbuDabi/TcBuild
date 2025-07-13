@@ -48,7 +48,11 @@ internal class MsilFile : IDisposable
     public void AddClasses(IEnumerable<ClassBlock> classes)
     {
         var index = Blocks.FindLastIndex(block => block is ClassBlock);
-        Blocks.InsertRange(index + 1, classes);
+        List<string> excludeClass = [
+            ".class private auto ansi sealed beforefieldinit Microsoft.CodeAnalysis.EmbeddedAttribute",
+            ".class private auto ansi sealed beforefieldinit System.Runtime.CompilerServices.RefSafetyRulesAttribute"
+        ];
+        Blocks.InsertRange(index + 1, classes.Where(c => !excludeClass.Any(ex => c.Header.Contains(ex))));
     }
 
     public void AddAssembly(AssemblyBlock assembly)
@@ -116,8 +120,8 @@ internal class MsilFile : IDisposable
                 switch (ch)
                 {
                     case '{':
-                        openBraces++;
-                        blockEntered = true;
+                    openBraces++;
+                    blockEntered = true;
                         break;
                     case '}':
                         openBraces--;
@@ -183,9 +187,9 @@ internal class MsilFile : IDisposable
 
                 if (commentBlock == CommentBlock.None)
                 {
-                if (ch == '(') openBraces++;
-                else if (ch == ')') openBraces--;
-            }
+                    if (ch == '(') openBraces++;
+                    else if (ch == ')') openBraces--;
+                }
             }
 
             codeLine += (codeLine.Length == 0 ? string.Empty : Environment.NewLine) + line;
