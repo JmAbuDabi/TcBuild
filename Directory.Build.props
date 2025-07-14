@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project>
   <PropertyGroup>
-    <Version>0.1.25</Version>
+    <Version>0.1.26</Version>
     <Authors>Oleg Yuvashev, René Larch, Martin Ficnar, JmAbuDabi</Authors>
     <Company>TcBuild</Company>
     <Copyright>Copyright © 2025 JmAbuDabi, 2020-21 Martin Ficnar &amp; 2019 René Larch &amp; 2015-16 Oleg Yuvashev</Copyright>
