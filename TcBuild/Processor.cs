@@ -9,328 +9,363 @@ using System.Threading;
 using System.Threading.Tasks;
 using TcPluginBase;
 using TcPluginBase.Tools;
-using Task = System.Threading.Tasks.Task;
 
+namespace TcBuild;
 
-namespace TcBuild {
-    public class Processor {
-        private readonly ILogger _log;
-        private readonly Tools _tools;
-        public FileInfo AssemblyFile { get; set; }
-        public FileInfo TcPluginBase { get; set; }
-        public DirectoryInfo IntermediateDirectory { get; set; }
-        public List<FileInfo> ReferenceFiles { get; set; }
-        public bool IsRelease { get; set; }
-        public DirectoryInfo CacheDir { get; set; }
+public class Processor(ILogger log, Tools tools)
+{
+    public FileInfo AssemblyFile { get; set; }
+    public FileInfo TcPluginBase { get; set; }
+    public DirectoryInfo IntermediateDirectory { get; set; }
+    public List<FileInfo> ReferenceFiles { get; set; }
+    public bool IsRelease { get; set; }
+    public DirectoryInfo CacheDir { get; set; }
 
+    public Task<bool> ExecuteAsync(CancellationToken token = default)
+    {
+        // parse
+        var (pluginType, excludedMethods, pluginClass, pluginAssemblyName) = AnalyzeAssembly(AssemblyFile);
 
-        public Processor(ILogger log, Tools tools)
+        log.LogMessage($"PluginAssembly: {pluginAssemblyName.FullName}");
+        log.LogMessage($"Type:           {pluginType}");
+        log.LogMessage($"Class:          {pluginClass}");
+        log.LogInfo($"ExcludedMethods:");
+        foreach (var method in excludedMethods)
         {
-            _log = log;
-            _tools = tools;
+            log.LogInfo($"    {method}");
         }
 
+        var outDir = IntermediateDirectory.CreateSubdirectory("out");
+        var workDir = IntermediateDirectory.CreateSubdirectory(nameof(TcBuild));
 
-        public Task<bool> ExecuteAsync(CancellationToken token = default)
+        var outFile = new FileInfo(Path.Combine(outDir.FullName, GetOutputFileName(pluginType, x64: false)));
+        var outFile64 = new FileInfo(Path.Combine(outDir.FullName, GetOutputFileName(pluginType, x64: true)));
+
+        // .config
+        var config = new FileInfo(AssemblyFile.FullName + ".config");
+
+        try
         {
-            // parse
-            var (pluginType, excludedMethods, pluginClass, pluginAssemblyName) = AnalyzeAssembly(AssemblyFile);
+            token.ThrowIfCancellationRequested();
 
-            _log.LogMessage($"PluginAssembly: {pluginAssemblyName.FullName}");
-            _log.LogMessage($"Type:           {pluginType}");
-            _log.LogMessage($"Class:          {pluginClass}");
-            _log.LogInfo($"ExcludedMethods:");
-            foreach (var method in excludedMethods) {
-                _log.LogInfo($"    {method}");
-            }
+            // process
+            var wrapperSource = ProcessSource(pluginType, excludedMethods, pluginClass, pluginAssemblyName);
+            log.LogInfo($"{wrapperSource.FullName}");
 
-            var outDir = IntermediateDirectory.CreateSubdirectory("out");
-            var workDir = IntermediateDirectory.CreateSubdirectory(nameof(TcBuild));
+            token.ThrowIfCancellationRequested();
 
-            var outFile = new FileInfo(Path.Combine(outDir.FullName, GetOutputFileName(pluginType, x64: false)));
-            var outFile64 = new FileInfo(Path.Combine(outDir.FullName, GetOutputFileName(pluginType, x64: true)));
+            // ico resource
+            FileInfo resFile = new FileInfo(Path.Combine(workDir.FullName, $"{AssemblyFile.Name}.res"));
+            tools.TryCreateResFile(AssemblyFile, resFile);
 
-            // .config
-            var config = new FileInfo(AssemblyFile.FullName + ".config");
+            // create: x86
+            tools.Assemble(wrapperSource, outFile, resFile, false, IsRelease);
+            log.LogInfo($"{outFile.FullName}");
 
-            try {
-                token.ThrowIfCancellationRequested();
+            token.ThrowIfCancellationRequested();
 
-                // process
-                var wrapperSource = ProcessSource(pluginType, excludedMethods, pluginClass, pluginAssemblyName);
-                _log.LogInfo($"{wrapperSource.FullName}");
+            // create: x64
+            tools.Assemble(wrapperSource, outFile64, resFile, true, IsRelease);
+            log.LogInfo($"{outFile64.FullName}");
 
-                token.ThrowIfCancellationRequested();
+            token.ThrowIfCancellationRequested();
 
-                // ico resource
-                FileInfo resFile = new FileInfo(Path.Combine(workDir.FullName, $"{AssemblyFile.Name}.res"));
-                _tools.TryCreateResFile(AssemblyFile, resFile);
-
-                // create: x86
-                _tools.Assemble(wrapperSource, outFile, resFile, false, IsRelease);
-                _log.LogInfo($"{outFile.FullName}");
-
-                token.ThrowIfCancellationRequested();
-
-                // create: x64
-                _tools.Assemble(wrapperSource, outFile64, resFile, true, IsRelease);
-                _log.LogInfo($"{outFile64.FullName}");
-
-                token.ThrowIfCancellationRequested();
-
-                // Zip
-                if (pluginType != PluginType.QuickSearch) {
-                    var zipFile = new FileInfo(Path.Combine(outDir.FullName, Path.ChangeExtension(AssemblyFile.Name, ".zip")));
-                    var iniFile = new FileInfo(Path.Combine(workDir.FullName, "pluginst.inf"));
-
-                    _log.LogInfo(zipFile.FullName);
-
-                    CreatePluginstFile(iniFile, outFile, pluginType);
-
-                    var success = _tools.CreateZip(zipFile,
-                        new[] {
-                            iniFile,
-                            outFile,
-                            outFile64,
-                            config,
-                            AssemblyFile,
-                            new FileInfo(Path.ChangeExtension(AssemblyFile.FullName, ".pdb")),
-                        }.Concat(ReferenceFiles.Where(_ => _.Extension != ".xml" && _.Name != "TcPluginBase.dll")
-                            // Hotfix until my pull request gets merged: https://github.com/peters/ILRepack.MSBuild.Task/pull/42
-                            //.Where(_ => _.Name != "Microsoft.Build.Framework.dll")
-                            //.Where(_ => _.Name != "Microsoft.Build.Utilities.Core.dll")
-                            //.Where(_ => _.Name != "System.Collections.Immutable.dll")
-                        ),
-                        GetSatelliteAssemblyFiles()
-                    );
-                    if (!success) {
-                        _log.LogWarning("ZIP Archiver is not found - Installation Archive is not created.");
-                    }
-                }
-
-                token.ThrowIfCancellationRequested();
-
-                return Task.FromResult(true);
-            }
-            finally {
-                // Cleanup
-                //AssemblyFile.Delete();
-                workDir.Delete(true);
-            }
-        }
-
-        private IEnumerable<FileInfo> GetSatelliteAssemblyFiles()
-        {
-            IEnumerable<FileInfo> allAssemblyFiles = new[] { AssemblyFile }.Concat(ReferenceFiles).Where(f => f.Extension.Equals(".dll", StringComparison.InvariantCultureIgnoreCase));
-            foreach (FileInfo assemblyFile in allAssemblyFiles)
+            // Zip
+            if (pluginType != PluginType.QuickSearch)
             {
-                foreach (FileInfo satelliteAssemblyFile in GetSatelliteAssemblyFiles(assemblyFile))
+                var zipFile = new FileInfo(Path.Combine(outDir.FullName, Path.ChangeExtension(AssemblyFile.Name, ".zip")));
+                var iniFile = new FileInfo(Path.Combine(workDir.FullName, "pluginst.inf"));
+
+                log.LogInfo(zipFile.FullName);
+
+                CreatePluginstFile(iniFile, outFile, pluginType);
+
+                var success = tools.CreateZip(zipFile,
+                    new[] {
+                        iniFile,
+                        outFile,
+                        outFile64,
+                        config,
+                        AssemblyFile,
+                        new FileInfo(Path.ChangeExtension(AssemblyFile.FullName, ".pdb")),
+                    }.Concat(ReferenceFiles.Where(_ => _.Extension != ".xml" && _.Name != "TcPluginBase.dll")
+                        // Hotfix until my pull request gets merged: https://github.com/peters/ILRepack.MSBuild.Task/pull/42
+                        //.Where(_ => _.Name != "Microsoft.Build.Framework.dll")
+                        //.Where(_ => _.Name != "Microsoft.Build.Utilities.Core.dll")
+                        //.Where(_ => _.Name != "System.Collections.Immutable.dll")
+                    ),
+                    GetSatelliteAssemblyFiles()
+                );
+                if (!success)
                 {
-                    yield return satelliteAssemblyFile;
+                    log.LogWarning("ZIP Archiver is not found - Installation Archive is not created.");
                 }
             }
-        }
 
-        private IEnumerable<FileInfo> GetSatelliteAssemblyFiles(FileInfo assemblyFile)
+            token.ThrowIfCancellationRequested();
+
+            return Task.FromResult(true);
+        }
+        finally
         {
-            return assemblyFile.Directory.EnumerateFiles($"{Path.GetFileNameWithoutExtension(assemblyFile.Name)}.resources{assemblyFile.Extension}", SearchOption.AllDirectories);
+            // Cleanup
+            //AssemblyFile.Delete();
+            workDir.Delete(true);
         }
+    }
 
-        private void CreatePluginstFile(FileInfo iniFile, FileInfo outFile, PluginType pluginType)
+    private IEnumerable<FileInfo> GetSatelliteAssemblyFiles()
+    {
+        IEnumerable<FileInfo> allAssemblyFiles = new[] { AssemblyFile }.Concat(ReferenceFiles).Where(f => f.Extension.Equals(".dll", StringComparison.InvariantCultureIgnoreCase));
+        foreach (FileInfo assemblyFile in allAssemblyFiles)
         {
-            var version = FileVersionInfo.GetVersionInfo(AssemblyFile.FullName);
-
-            var desc = version.Comments ?? version.FileDescription;
-            if (string.IsNullOrEmpty(desc)) {
-                // TC needs a description to show the install dialog!
-                _log.LogWarning("[plugininstall] description is empty! Using default description. (to change description add [assembly: AssemblyDescription(\"...\")] attribute)");
-                desc = $"{Path.GetFileNameWithoutExtension(outFile.Name)} is a File System Plugin for Total Commander";
-            }
-
-            var plugininstall = new List<string> {
-                $"[plugininstall]",
-                $"type={TcUtils.PluginExtensions[pluginType]}",
-                $"file={outFile.Name}",
-                $"description={desc}",
-                $"defaultdir={Path.GetFileNameWithoutExtension(outFile.Name)}",
-                $"version={version.FileVersion}"
-            };
-
-            if (pluginType == PluginType.Packer) {
-                plugininstall.Add($"defaultextension=???");
-            }
-
-            using (var sw = new StreamWriter(iniFile.FullName, false, Encoding.Default)) {
-                foreach (var line in plugininstall) {
-                    sw.WriteLine(line);
-                }
+            foreach (FileInfo satelliteAssemblyFile in GetSatelliteAssemblyFiles(assemblyFile))
+            {
+                yield return satelliteAssemblyFile;
             }
         }
+    }
 
+    private IEnumerable<FileInfo> GetSatelliteAssemblyFiles(FileInfo assemblyFile)
+    {
+        return assemblyFile.Directory.EnumerateFiles($"{Path.GetFileNameWithoutExtension(assemblyFile.Name)}.resources{assemblyFile.Extension}", SearchOption.AllDirectories);
+    }
 
-        private string GetOutputFileName(PluginType pluginType, bool x64)
+    private void CreatePluginstFile(FileInfo iniFile, FileInfo outFile, PluginType pluginType)
+    {
+        var version = FileVersionInfo.GetVersionInfo(AssemblyFile.FullName);
+
+        var desc = version.Comments ?? version.FileDescription;
+        if (string.IsNullOrEmpty(desc))
         {
-            var name = pluginType == PluginType.QuickSearch ? "tcmatch" : Path.GetFileNameWithoutExtension(AssemblyFile.Name);
-            var extension = "." + TcUtils.PluginExtensions[pluginType];
-
-            if (x64) {
-                if (extension == ".dll") {
-                    name += "64";
-                }
-                else {
-                    extension += "64";
-                }
-            }
-
-            return name + extension;
+            // TC needs a description to show the install dialog!
+            log.LogWarning("[plugininstall] description is empty! Using default description. (to change description add [assembly: AssemblyDescription(\"...\")] attribute)");
+            desc = $"{Path.GetFileNameWithoutExtension(outFile.Name)} is a File System Plugin for Total Commander";
         }
 
-
-        internal (PluginType PluginType, string[] ExcludedMethods, string pluginClass, AssemblyName pluginAssemblyName) AnalyzeAssembly(FileInfo assemblyFile)
-        {
-            AppDomain.CurrentDomain.AssemblyResolve += new RelativeAssemblyResolver(assemblyFile.FullName).AssemblyResolve;
-            var assembly = Assembly.LoadFile(assemblyFile.FullName);
-
-            var parser = new AssemblyParser(assembly);
-            var implementations = parser.GetImplementations();
-
-            // get excluded
-            var excludedMethods = new List<string>();
-            foreach (var implementation in implementations) {
-                var pluginType = implementation.Key;
-                var pluginClasses = implementation.Value;
-
-                if (pluginClasses.Length > 1) {
-                    throw new Exception($"Too many {pluginType} Plugin implementations in one project!! Found implementations in: {string.Join(", ", pluginClasses.Select(_ => _.FullName))}");
-                }
-
-                excludedMethods.AddRange(parser.GetExcludedMethods(pluginClasses[0], pluginType));
-            }
-
-            // check pluginType
-            Type pluginClass;
-            var pluginTypes = implementations.Select(_ => _.Key).ToArray();
-            switch (pluginTypes.Length) {
-                case 0:
-                    throw new Exception("No Plugin implementation found!!");
-                case 1:
-                    // this is valid
-                    pluginClass = implementations.FirstOrDefault().Value.Single();
-
-                    if (pluginTypes[0] == PluginType.FileSystem) {
-                        // exclude ContentPlugin methods from FileSystem plugin
-                        excludedMethods.AddRange(parser.GetExcludedMethods(null, PluginType.Content));
-                    }
-
-                    break;
-                case 2 when pluginTypes.Contains(PluginType.FileSystem) && pluginTypes.Contains(PluginType.Content):
-                    pluginTypes = new[] {PluginType.FileSystem};
-                    pluginClass = implementations.FirstOrDefault(_ => _.Key == PluginType.FileSystem).Value.Single();
-                    break;
-                default:
-                    throw new Exception("Too Many or invalid combination of Plugin implementations found!!");
-            }
-
-            var plgType = pluginTypes[0];
-
-            return (plgType, excludedMethods.Distinct().ToArray(), pluginClass.FullName, pluginClass.Assembly.GetName());
-        }
-
-
-        private readonly Dictionary<PluginType, Type> Wrapper = new Dictionary<PluginType, Type> {
-            {PluginType.Content, typeof(WdxWrapper.ContentWrapper)},
-            {PluginType.FileSystem, typeof(WfxWrapper.FsWrapper)},
-            {PluginType.Lister, typeof(WlxWrapper.ListerWrapper)},
-            {PluginType.Packer, typeof(WcxWrapper.PackerWrapper)},
-            {PluginType.QuickSearch, typeof(QSWrapper.QuickSearchWrapper)}
+        var plugininstall = new List<string> {
+            $"[plugininstall]",
+            $"type={TcUtils.PluginExtensions[pluginType]}",
+            $"file={outFile.Name}",
+            $"description={desc}",
+            $"defaultdir={Path.GetFileNameWithoutExtension(outFile.Name)}",
+            $"version={version.FileVersion}"
         };
 
-
-        private FileInfo ProcessSource(PluginType pluginType, string[] methodsToRemoveFromWrapper, string pluginClass, AssemblyName pluginAssemblyName)
+        if (pluginType == PluginType.Packer)
         {
-            var assemblyName = pluginAssemblyName.Name;
-            var v = pluginAssemblyName.Version;
-
-            var wrapper = GetWrapperSource(pluginType, methodsToRemoveFromWrapper, assemblyName, pluginClass);
-
-            var tcPluginBase = GetMsilFile(TcPluginBase.FullName, cache: false);
-            tcPluginBase.AddClasses(wrapper.Classes);
-            tcPluginBase.AddAssembly(new AssemblyBlock {
-                Name = assemblyName,
-                Header = $".assembly extern '{assemblyName}'",
-                Lines = new object[] {
-                    "{",
-                    $"  .ver {v.Major}:{v.Minor}:{v.Build}:{v.Revision}",
-                    "}"
-                }
-            });
-            var wrapperSource = tcPluginBase.SaveTo("output.il");
-            return wrapperSource;
+            plugininstall.Add($"defaultextension=???");
         }
 
-
-        private MsilFile GetWrapperSource(PluginType pluginType, string[] methodsToRemoveFromWrapper, string pluginAssemblyName, string pluginClass)
+        using (var sw = new StreamWriter(iniFile.FullName, false, Encoding.Default))
         {
-            var wrapperType = Wrapper[pluginType];
-
-            var exportedMethods = new AssemblyParser(wrapperType.Assembly).GetExportedMethods();
-            exportedMethods = exportedMethods.Where(_ => !methodsToRemoveFromWrapper.Contains(_.ExportName)).ToArray();
-
-            var wrapper = GetMsilFile(wrapperType.Assembly.Location, cache: false, il => il
-                .Replace("[TcPluginBase]TcPluginBase.PluginClassPlaceholder", $"[{pluginAssemblyName}]{pluginClass}")
-                .Replace("[TcPluginBase]", "")
-            );
-
-            var dllExportAttribute = $".custom instance void {typeof(DllExportAttribute).FullName}";
-
-            var count = 1;
-            foreach (var method in wrapper.Classes.SelectMany(_ => _.Methods).Where(_ => _.Public && _.Static)) {
-                var index = method.Lines.ToList().FindIndex(_ => _.ToString().Contains(dllExportAttribute));
-
-                if (index != -1) {
-                    var exportName = exportedMethods.FirstOrDefault(x => x.Method == method.Name).ExportName;
-
-                    if (!string.IsNullOrEmpty(exportName)) {
-                        method.Lines[index] = $".export [{count++}] as '{exportName}'";
-                    }
-                }
+            foreach (var line in plugininstall)
+            {
+                sw.WriteLine(line);
             }
+        }
+    }
 
-            return wrapper;
+    private string GetOutputFileName(PluginType pluginType, bool x64)
+    {
+        var name = pluginType == PluginType.QuickSearch ? "tcmatch" : Path.GetFileNameWithoutExtension(AssemblyFile.Name);
+        var extension = "." + TcUtils.PluginExtensions[pluginType];
+
+        if (x64)
+        {
+            if (extension == ".dll")
+            {
+                name += "64";
+            }
+            else
+            {
+                extension += "64";
+            }
         }
 
+        return name + extension;
+    }
 
-        private MsilFile GetMsilFile(string assemblyLocation, bool cache = false, Func<string, string> modifySource = null)
+    internal (PluginType PluginType, string[] ExcludedMethods, string pluginClass, AssemblyName pluginAssemblyName) AnalyzeAssembly(FileInfo assemblyFile)
+    {
+        AppDomain.CurrentDomain.AssemblyResolve += new RelativeAssemblyResolver(assemblyFile.FullName).AssemblyResolve;
+        var assembly = Assembly.LoadFile(assemblyFile.FullName);
+
+        var parser = new AssemblyParser(assembly);
+        var implementations = parser.GetImplementations();
+
+        // get excluded
+        var excludedMethods = new List<string>();
+        foreach (var implementation in implementations)
         {
-            var cacheFile = new FileInfo(Path.Combine(CacheDir.FullName, Path.GetFileName(assemblyLocation) + ".il"));
-            if (cache && cacheFile.Exists) {
-                return new MsilFile(cacheFile);
+            var pluginType = implementation.Key;
+            var pluginClasses = implementation.Value;
+
+            if (pluginClasses.Length > 1)
+            {
+                throw new Exception($"Too many {pluginType} Plugin implementations in one project!! Found implementations in: {string.Join(", ", pluginClasses.Select(_ => _.FullName))}");
             }
 
-            var dir = new DirectoryInfo(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString()));
-            try {
-                dir.Create();
+            excludedMethods.AddRange(parser.GetExcludedMethods(pluginClasses[0], pluginType));
+        }
 
-                var source = new FileInfo(Path.Combine(dir.FullName, "input.il"));
-                _tools.Disassemble(new FileInfo(assemblyLocation), source, emitDebugSymbols: !IsRelease);
+        // check pluginType
+        Type pluginClass;
+        var pluginTypes = implementations.Select(_ => _.Key).ToArray();
+        switch (pluginTypes.Length)
+        {
+            case 0:
+                throw new Exception("No Plugin implementation found!!");
+            case 1:
+                // this is valid
+                pluginClass = implementations.FirstOrDefault().Value.Single();
 
-                if (modifySource != null) {
-                    var src = File.ReadAllText(source.FullName);
-                    src = modifySource(src);
-                    File.WriteAllText(source.FullName, src);
+                if (pluginTypes[0] == PluginType.FileSystem)
+                {
+                    // exclude ContentPlugin methods from FileSystem plugin
+                    excludedMethods.AddRange(parser.GetExcludedMethods(null, PluginType.Content));
                 }
 
-                if (cache) {
-                    source.CopyTo(cacheFile.FullName);
+                break;
+            case 2 when pluginTypes.Contains(PluginType.FileSystem) && pluginTypes.Contains(PluginType.Content):
+                pluginTypes = new[] { PluginType.FileSystem };
+                pluginClass = implementations.FirstOrDefault(_ => _.Key == PluginType.FileSystem).Value.Single();
+                break;
+            default:
+                throw new Exception("Too Many or invalid combination of Plugin implementations found!!");
+        }
+
+        var plgType = pluginTypes[0];
+
+        return (plgType, excludedMethods.Distinct().ToArray(), pluginClass.FullName, pluginClass.Assembly.GetName());
+    }
+
+    private readonly Dictionary<PluginType, Type> Wrapper = new Dictionary<PluginType, Type> {
+        {PluginType.Content, typeof(WdxWrapper.ContentWrapper)},
+        {PluginType.FileSystem, typeof(WfxWrapper.FsWrapper)},
+        {PluginType.Lister, typeof(WlxWrapper.ListerWrapper)},
+        {PluginType.Packer, typeof(WcxWrapper.PackerWrapper)},
+        {PluginType.QuickSearch, typeof(QSWrapper.QuickSearchWrapper)}
+    };
+
+    private FileInfo ProcessSource(PluginType pluginType, string[] methodsToRemoveFromWrapper, string pluginClass, AssemblyName pluginAssemblyName)
+    {
+        var assemblyName = pluginAssemblyName.Name;
+        var v = pluginAssemblyName.Version;
+
+        var wrapper = GetWrapperSource(pluginType, methodsToRemoveFromWrapper, assemblyName, pluginClass);
+
+        var tcPluginBase = GetMsilFile(TcPluginBase.FullName, cache: false);
+        tcPluginBase.AddClasses(wrapper.Classes);
+        tcPluginBase.AddAssembly(new AssemblyBlock
+        {
+            Name = assemblyName,
+            Header = $".assembly extern '{assemblyName}'",
+            Lines = new object[] {
+                "{",
+                $"  .ver {v.Major}:{v.Minor}:{v.Build}:{v.Revision}",
+                "}"
+            }
+        });
+        var wrapperSource = tcPluginBase.SaveTo("output.il");
+        return wrapperSource;
+    }
+
+    private MsilFile GetWrapperSource(PluginType pluginType, string[] methodsToRemoveFromWrapper, string pluginAssemblyName, string pluginClass)
+    {
+        var wrapperType = Wrapper[pluginType];
+
+        var exportedMethods = new AssemblyParser(wrapperType.Assembly).GetExportedMethods();
+        exportedMethods = exportedMethods.Where(_ => !methodsToRemoveFromWrapper.Contains(_.ExportName)).ToArray();
+
+        var wrapper = GetMsilFile(wrapperType.Assembly.Location, cache: false, il => il
+            .Replace("[TcPluginBase]TcPluginBase.PluginClassPlaceholder", $"[{pluginAssemblyName}]{pluginClass}")
+            .Replace("[TcPluginBase]", "")
+        );
+
+        PatchExportAttribute(wrapper, exportedMethods);
+
+        return wrapper;
+    }
+
+    private MsilFile GetMsilFile(string assemblyLocation, bool cache = false, Func<string, string> modifySource = null)
+    {
+        var cacheFile = new FileInfo(Path.Combine(CacheDir.FullName, Path.GetFileName(assemblyLocation) + ".il"));
+        if (cache && cacheFile.Exists)
+        {
+            return new MsilFile(cacheFile);
+        }
+
+        var dir = new DirectoryInfo(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString()));
+        try
+        {
+            dir.Create();
+
+            var source = new FileInfo(Path.Combine(dir.FullName, "input.il"));
+            tools.Disassemble(new FileInfo(assemblyLocation), source, emitDebugSymbols: !IsRelease);
+
+            if (modifySource != null)
+            {
+                var src = File.ReadAllText(source.FullName);
+                src = modifySource(src);
+                File.WriteAllText(source.FullName, src);
+            }
+
+            if (cache)
+            {
+                source.CopyTo(cacheFile.FullName);
+            }
+
+            var msilFile = new MsilFile(source, dir);
+
+            return msilFile;
+        }
+        finally
+        {
+            //dir.Delete(true);
+        }
+    }
+
+    private static void PatchExportAttribute(MsilFile msilFile, (string Method, string ExportName)[] exportedMethods)
+    {
+        var dllExportAttribute = $".custom instance void {typeof(DllExportAttribute).FullName}";
+
+        var count = 1;
+        foreach (var method in msilFile.Classes.SelectMany(_ => _.Methods).Where(_ => _.Public && _.Static))
+        {
+            var index = method.Lines.ToList().FindIndex(_ => _.ToString().Contains(dllExportAttribute));
+
+            if (index == -1) continue;
+
+            var exportName = exportedMethods.FirstOrDefault(x => x.Method == method.Name).ExportName;
+
+            if (string.IsNullOrEmpty(exportName)) continue;
+
+            var testLine = method.Lines[index].ToString();
+            method.Lines[index] = $".export [{count++}] as {exportName}";
+
+            if (testLine.Substring(testLine.IndexOf("()", StringComparison.Ordinal) + 2).Contains(")")) continue;
+
+            var j = index + 1;
+            var newLines = method.Lines.ToList();
+
+            while (j < method.Lines.Length)
+            {
+                var raw = newLines[j].ToString();
+                var codePart = raw.Split(["//"], 2, StringSplitOptions.None)[0];
+
+                if (codePart.Contains("(")) break;
+
+                if (codePart.Contains(")"))
+                {
+                    newLines.RemoveAt(j);
+                    break;
                 }
 
-                var msilFile = new MsilFile(source, dir);
+                newLines.RemoveAt(j);
+            }
 
-                return msilFile;
-            }
-            finally {
-                //dir.Delete(true);
-            }
+            method.Lines = newLines.ToArray();
         }
     }
 }
