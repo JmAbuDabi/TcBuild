@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project>
   <PropertyGroup>
-    <Version>0.1.25</Version>
-    <Authors>Oleg Yuvashev, René Larch, Martin Ficnar</Authors>
+    <Version>0.1.30</Version>
+    <Authors>Oleg Yuvashev, René Larch, Martin Ficnar, JmAbuDabi</Authors>
     <Company>TcBuild</Company>
-    <Copyright>Copyright © 2020-21 Martin Ficnar &amp; 2019 René Larch &amp; 2015-16 Oleg Yuvashev</Copyright>
+    <Copyright>Copyright © 2025 JmAbuDabi, 2020-21 Martin Ficnar &amp; 2019 René Larch &amp; 2015-16 Oleg Yuvashev</Copyright>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <LangVersion>latest</LangVersion>
     <NoWarn>CS1591;CS0618</NoWarn>
@@ -13,8 +13,8 @@
     <NoPackageAnalysis>true</NoPackageAnalysis>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageOutputPath>$(SolutionDir)nugets</PackageOutputPath>
-    <PackageProjectUrl>https://github.com/ficnar/TcBuild</PackageProjectUrl>
-    <PackageIconUrl>https://raw.githubusercontent.com/ficnar/TcBuild/master/package_icon.png</PackageIconUrl>
+    <PackageProjectUrl>https://github.com/JmAbuDabi/TcBuild</PackageProjectUrl>
+    <PackageIconUrl>https://raw.githubusercontent.com/JmAbuDabi/TcBuild/master/package_icon.png</PackageIconUrl>
     <PackageTags>.net Total-Commander-Plugin</PackageTags>
     <!-- Boost the debugging experience when building -->
     <PublishRepositoryUrl>true</PublishRepositoryUrl>

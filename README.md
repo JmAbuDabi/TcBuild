@@ -1,16 +1,16 @@
 
-# TcBuild.ficnar
+# TcBuild.JmAbuDabi
 
-TcBuild.ficnar is a tool to build Total Commander plugins that are written in .NET forked from [r-Larch/TcBuild](https://github.com/r-Larch/TcBuild)
+TcBuild.JmAbuDabi is a tool to build Total Commander plugins that are written in .NET forked from [ficnar/TcBuild](https://github.com/ficnar/TcBuild)
 
-[![Nuget](https://img.shields.io/nuget/vpre/TcBuild.ficnar.svg?style=flat)](https://www.nuget.org/packages/TcBuild.ficnar/)
-![License](https://img.shields.io/github/license/ficnar/TcBuild.svg)
+[![Nuget](https://img.shields.io/nuget/vpre/TcBuild.JmAbuDabi.svg?style=flat)](https://www.nuget.org/packages/TcBuild.JmAbuDabi/)
+![License](https://img.shields.io/github/license/JmAbuDabi/TcBuild)
 
 
 ## Nuget
 
 ```powershell
-Install-Package TcBuild.ficnar
+Install-Package TcBuild.JmAbuDabi
 ```
 
 ## Possible Plugins
@@ -27,8 +27,8 @@ See [Total Commander plugin types](https://www.ghisler.ch/wiki/index.php/Plugin#
 
 # Create a plugin
 
-Create a .NET Library Project targeting net472 or newer and install `TcBuild.ficnar` nuget package.
-The TcBuild.ficnar nuget comes with some base classes and interfaces to get you started.
+Create a .NET Library Project targeting net472 or newer and install `TcBuild.JmAbuDabi` nuget package.
+The TcBuild.JmAbuDabi nuget comes with some base classes and interfaces to get you started.
 So you just have to create a class inheriting from 
 one of the following plugin base classes:
 
@@ -58,11 +58,13 @@ that runs on .NET 4.0 and is not that easy to get up and running.
 
 René Larch used his code (it is Licesed as MIT) and wrote this Nuget with it.
 
-So, me (Martin Ficnar) continue with support this package under MIT license.
+Martin Ficnar continue with support this package under MIT license.
 
-### Pros and cons of TcBuild.ficnar compared to TC .NET Interface
+So, me (JmAbuDabi) continue with support this package under MIT license.
 
-|						| TcBuild.ficnar							| TC .NET Interface								|
+### Pros and cons of TcBuild.JmAbuDabi compared to TC .NET Interface
+
+|						| TcBuild.JmAbuDabi							| TC .NET Interface								|
 |-----------------------|---------------------------------------|-----------------------------------------------|
 | .NET Version			| ✔️ .NET 4.7.2							| ❌.NET 1.0 & .NET 4.0							|
 | Getting started		| ✔️Install this Nuget					| ❌Lots of work									|
